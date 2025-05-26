@@ -2,7 +2,7 @@ import os
 import re
 import base64
 import datetime
-from typing import Optional
+from typing import Optional, Tuple
 from pathlib import Path
 import face_recognition
 import cv2
@@ -37,9 +37,11 @@ class User(Base):
 Base.metadata.create_all(engine)
 
 # Constants
-FACE_DISTANCE_THRESHOLD = 0.6  # Lower is more strict
+FACE_DISTANCE_THRESHOLD = 0.45  # More strict threshold (was 0.6)
 MAX_LOGIN_ATTEMPTS = 3
 LOCKOUT_DURATION = 15 * 60  # 15 minutes in seconds
+MIN_FACE_SIZE = (80, 80)  # Minimum face size for detection
+FACE_DETECTION_CONFIDENCE = 0.9  # Minimum confidence for face detection
 
 # Global storage for login attempts and lockouts
 login_attempts = {}
@@ -88,23 +90,41 @@ def save_face_image(filename: str, b64data: str) -> Optional[str]:
         return None
 
 def get_face_encoding(image_path: str) -> Optional[np.ndarray]:
-    """Extract face encoding from image"""
+    """Extract face encoding from image with improved accuracy"""
     try:
         # Read image
         image = face_recognition.load_image_file(image_path)
         
-        # Find face locations
-        face_locations = face_recognition.face_locations(image, model="hog")
+        # Find face locations with more accurate CNN model
+        face_locations = face_recognition.face_locations(image, model="cnn")
         if not face_locations:
-            print("No face detected in image")
-            return None
-            
+            # Fallback to HOG model if CNN fails
+            face_locations = face_recognition.face_locations(image, model="hog")
+            if not face_locations:
+                print("No face detected in image")
+                return None
+        
         # Get the largest face (closest to camera)
         if len(face_locations) > 1:
+            # Sort by face size (largest first)
             face_locations.sort(key=lambda rect: (rect[2] - rect[0]) * (rect[1] - rect[3]), reverse=True)
+        
+        # Check minimum face size
+        top, right, bottom, left = face_locations[0]
+        face_width = right - left
+        face_height = bottom - top
+        if face_width < MIN_FACE_SIZE[0] or face_height < MIN_FACE_SIZE[1]:
+            print(f"Face too small: {face_width}x{face_height} pixels")
+            return None
             
-        # Get face encoding
-        encodings = face_recognition.face_encodings(image, [face_locations[0]], num_jitters=2)
+        # Get face encoding with increased accuracy
+        encodings = face_recognition.face_encodings(
+            image, 
+            [face_locations[0]], 
+            num_jitters=5,  # Increased from 2
+            model="large"  # Use large model for better accuracy
+        )
+        
         if not encodings:
             print("Could not compute face encoding")
             return None
@@ -113,6 +133,43 @@ def get_face_encoding(image_path: str) -> Optional[np.ndarray]:
     except Exception as e:
         print(f"Error getting face encoding: {e}")
         return None
+
+def verify_face(stored_encoding: bytes, login_image_path: str, threshold: float = FACE_DISTANCE_THRESHOLD) -> Tuple[bool, float]:
+    """Verify face with improved accuracy checks"""
+    try:
+        if stored_encoding is None:
+            print("[verify_face] Stored encoding is None")
+            return False, 0.0
+            
+        # Get login face encoding
+        login_encoding = get_face_encoding(login_image_path)
+        if login_encoding is None:
+            print("[verify_face] Could not extract login face encoding")
+            return False, 0.0
+            
+        # Convert stored encoding from bytes
+        stored_encoding_array = np.frombuffer(stored_encoding, dtype=np.float64)
+        
+        # Calculate face distance
+        face_distance = face_recognition.face_distance([stored_encoding_array], login_encoding)[0]
+        
+        # Convert distance to similarity score (0-1, higher is better)
+        similarity = 1 - face_distance
+        
+        # Add additional checks for very low similarity scores
+        if similarity < 0.3:  # Extremely low similarity
+            print(f"[verify_face] Very low similarity score: {similarity:.3f}")
+            return False, similarity
+            
+        # Check if similarity exceeds threshold
+        is_match = similarity >= (1 - threshold)
+        print(f"[verify_face] Similarity score: {similarity:.3f}, Threshold: {1-threshold:.3f}, Match: {is_match}")
+        
+        return is_match, similarity
+        
+    except Exception as e:
+        print(f"[verify_face] Error: {e}")
+        return False, 0.0
 
 def send_alert_email(to_email: str, image_path: str, attempt_details: str):
     """Send security alert email for failed login attempts"""
@@ -266,27 +323,19 @@ def login():
             if not img_path:
                 return "Error processing face image", 403
                 
-            # Get face encoding from login attempt
-            login_encoding = get_face_encoding(img_path)
-            if login_encoding is None:
-                os.unlink(img_path)
-                return "No face detected or could not process face", 403
-                
-            # Compare face encodings
-            stored_encoding = np.frombuffer(user.face_encoding, dtype=np.float64)
-            face_distance = face_recognition.face_distance([stored_encoding], login_encoding)[0]
-            is_match = face_distance <= FACE_DISTANCE_THRESHOLD
+            # Verify face
+            is_match, similarity = verify_face(user.face_encoding, img_path)
             
             if is_match:
                 # Successful login
                 login_attempts[email] = 0
                 if os.path.exists(img_path):
                     os.unlink(img_path)
-                return f"Access Granted (Confidence: {1 - face_distance:.2f})"
+                return f"Access Granted (Confidence: {similarity:.2f})"
             else:
                 # Failed login attempt
                 login_attempts[email] = login_attempts.get(email, 0) + 1
-                attempt_details = f"Face distance: {face_distance:.3f}"
+                attempt_details = f"Similarity score: {similarity:.3f}"
                 
                 if login_attempts[email] >= MAX_LOGIN_ATTEMPTS:
                     # Lock account
