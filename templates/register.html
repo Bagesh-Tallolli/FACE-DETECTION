@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Face Recognition</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        #video {
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        #canvas {
+            display: none;
+        }
+        .capture-btn {
+            transition: all 0.3s ease;
+        }
+        .capture-btn:hover {
+            transform: scale(1.05);
+        }
+        .capture-btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-8 bg-white p-8 rounded-lg shadow-lg">
+        <div>
+            <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
+                Create your account
+            </h2>
+            <p class="mt-2 text-center text-sm text-gray-600">
+                Or
+                <a href="/login" class="font-medium text-indigo-600 hover:text-indigo-500">
+                    sign in to your existing account
+                </a>
+            </p>
+        </div>
+        
+        <form class="mt-8 space-y-6" id="registerForm" method="POST">
+            <div class="rounded-md shadow-sm -space-y-px">
+                <div>
+                    <label for="email" class="sr-only">Email address</label>
+                    <input id="email" name="email" type="email" required
+                           class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                           placeholder="Email address">
+                </div>
+                <div>
+                    <label for="password" class="sr-only">Password</label>
+                    <input id="password" name="password" type="password" required
+                           class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                           placeholder="Password">
+                </div>
+                <div>
+                    <label for="confirmPassword" class="sr-only">Confirm Password</label>
+                    <input id="confirmPassword" name="confirmPassword" type="password" required
+                           class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                           placeholder="Confirm Password">
+                </div>
+            </div>
+
+            <div class="camera-container">
+                <video id="video" autoplay playsinline></video>
+                <canvas id="canvas"></canvas>
+            </div>
+
+            <div>
+                <button type="button" id="captureBtn"
+                        class="capture-btn group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+                        <svg class="h-5 w-5 text-indigo-500 group-hover:text-indigo-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4 5a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-1.586a1 1 0 01-.707-.293l-1.121-1.121A2 2 0 0011.172 3H8.828a2 2 0 00-1.414.586L6.293 4.707A1 1 0 015.586 5H4zm6 9a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+                        </svg>
+                    </span>
+                    Capture Face
+                </button>
+                <button type="submit"
+                        class="mt-4 group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                    <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+                        <svg class="h-5 w-5 text-green-500 group-hover:text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                        </svg>
+                    </span>
+                    Register
+                </button>
+            </div>
+        </form>
+
+        <div id="message" class="mt-4 text-center hidden">
+            <p class="text-sm font-medium"></p>
+        </div>
+    </div>
+
+    <script>
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let captureBtn = document.getElementById('captureBtn');
+        let registerForm = document.getElementById('registerForm');
+        let messageDiv = document.getElementById('message');
+        let faceData = null;
+
+        // Access webcam
+        async function setupCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showMessage('Your browser does not support webcam access. Please use a modern browser like Chrome, Firefox, or Edge.', true);
+                return;
+            }
+
+            try {
+                // First, check if any video devices exist
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                if (videoDevices.length === 0) {
+                    showMessage('No webcam detected. Please connect a webcam and refresh the page.', true);
+                    return;
+                }
+
+                // Try to access the webcam
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: "user",
+                        deviceId: videoDevices[0].deviceId  // Use the first available camera
+                    } 
+                });
+                
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play().catch(e => {
+                        showMessage('Error playing video: ' + e.message, true);
+                    });
+                };
+            } catch (err) {
+                console.error('Camera error:', err);
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    showMessage('Camera access denied. Please allow camera access and refresh the page.', true);
+                } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                    showMessage('No webcam found. Please connect a webcam and refresh the page.', true);
+                } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                    showMessage('Your webcam is already in use by another application. Please close other apps using the webcam.', true);
+                } else {
+                    showMessage('Error accessing camera: ' + err.message, true);
+                }
+            }
+        }
+
+        function showMessage(text, isError = false) {
+            messageDiv.classList.remove('hidden');
+            messageDiv.querySelector('p').textContent = text;
+            messageDiv.querySelector('p').className = 
+                'text-sm font-medium ' + (isError ? 'text-red-600' : 'text-green-600');
+        }
+
+        // Capture image
+        captureBtn.addEventListener('click', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            faceData = canvas.toDataURL('image/jpeg');
+            showMessage('Face captured! You can now register.');
+        });
+
+        // Handle form submission
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            if (password !== confirmPassword) {
+                showMessage('Passwords do not match!', true);
+                return;
+            }
+            
+            if (!faceData) {
+                showMessage('Please capture your face first!', true);
+                return;
+            }
+
+            const formData = new FormData(registerForm);
+            formData.delete('confirmPassword');
+            formData.append('face_data', faceData);
+
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.text();
+                
+                if (response.ok) {
+                    showMessage('Registration successful! Redirecting to login...');
+                    setTimeout(() => window.location.href = '/login', 2000);
+                } else {
+                    showMessage(result, true);
+                }
+            } catch (err) {
+                showMessage('Error during registration: ' + err.message, true);
+            }
+        });
+
+        // Start camera when page loads
+        setupCamera();
+    </script>
+</body>
+</html> 
