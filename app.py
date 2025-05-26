@@ -14,8 +14,6 @@ from sqlalchemy.exc import IntegrityError
 from email.message import EmailMessage
 import smtplib
 from dotenv import load_dotenv
-
-# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
